@@ -7,7 +7,7 @@
     "zone",
     "time zone"
   ],
-  "name": "timebridge",
+  "name": "Timebridge",
   "private": true,
   "pebble": {
     "displayName": "Timebridge",
@@ -15,7 +15,14 @@
     "messageKeys": [],
     "projectType": "native",
     "resources": {
-      "media": []
+      "media": [
+        {
+          "type": "png",
+          "name": "MENU_ICON",
+          "file": "images/menu_icon.png",
+          "menuIcon": true
+        }
+      ]
     },
     "sdkVersion": "3",
     "targetPlatforms": [
@@ -30,5 +37,5 @@
       "watchface": false
     }
   },
-  "version": "1.0.0"
+  "version": "1.2.0"
 }

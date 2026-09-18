@@ -285,6 +285,11 @@ static void draw_left_text(GContext *ctx, const char *text, GFont font, GRect fr
                      GTextAlignmentLeft, NULL);
 }
 
+static void draw_centered_text(GContext *ctx, const char *text, GFont font, GRect frame) {
+  graphics_draw_text(ctx, text, font, frame, GTextOverflowModeTrailingEllipsis,
+                     GTextAlignmentCenter, NULL);
+}
+
 static void draw_dotted_divider(GContext *ctx, int width, int y) {
   graphics_context_set_stroke_color(ctx, border_color());
   for (int x = 5; x < width - 5; x += 4) {
@@ -341,16 +346,24 @@ static void draw_day_night_icon(GContext *ctx, int center_x, int center_y, bool 
 static void draw_time_group(GContext *ctx, int width, int top, const char *heading,
                             const char *time_text, const char *date_text,
                             const struct tm *time_info) {
+  int text_top = s_settings.show_date ? 10 : 18;
+  int icon_center_y = s_settings.use_24_hour ? 42 : 33;
   graphics_context_set_text_color(ctx, foreground_color());
   draw_left_text(ctx, heading, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                 GRect(5, top, width - 46, 14));
-  draw_left_text(ctx, time_text, fonts_get_system_font(FONT_KEY_BITHAM_30_BLACK),
-                 GRect(5, top + 14, width - 46, 34));
+                 GRect(5, top + text_top, width - 46, 14));
+  draw_left_text(ctx, time_text, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS),
+                 GRect(5, top + text_top + 13, width - 46, 36));
   if (s_settings.show_date) {
     draw_left_text(ctx, date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14),
-                   GRect(5, top + 48, width - 10, 14));
+                   GRect(5, top + text_top + 50, width - 10, 14));
   }
-  draw_day_night_icon(ctx, width - 23, top + 31, is_night_time(time_info));
+  draw_day_night_icon(ctx, width - 23, top + icon_center_y,
+                      is_night_time(time_info));
+  if (!s_settings.use_24_hour) {
+    draw_centered_text(ctx, time_info->tm_hour < 12 ? "AM" : "PM",
+                       fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                       GRect(width - 43, top + 52, 40, 14));
+  }
 }
 
 static void face_layer_update_proc(Layer *layer, GContext *ctx) {
@@ -376,7 +389,7 @@ static void face_layer_update_proc(Layer *layer, GContext *ctx) {
   draw_time_group(ctx, width, top, "Timebridge", s_local_time_text,
                   s_local_date_text, &s_local_display_time);
   draw_dotted_divider(ctx, width, top + 84);
-  draw_time_group(ctx, width, top + 92, selected_timezone->label,
+  draw_time_group(ctx, width, top + 84, selected_timezone->label,
                   s_selected_time_text, s_selected_date_text,
                   &s_selected_display_time);
 }
