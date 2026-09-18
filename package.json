@@ -1,0 +1,34 @@
+{
+  "author": "Keshavpratap",
+  "dependencies": {},
+  "keywords": [
+    "timezone",
+    "time",
+    "zone",
+    "time zone"
+  ],
+  "name": "timebridge",
+  "private": true,
+  "pebble": {
+    "displayName": "Timebridge",
+    "enableMultiJS": true,
+    "messageKeys": [],
+    "projectType": "native",
+    "resources": {
+      "media": []
+    },
+    "sdkVersion": "3",
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "diorite",
+      "emery",
+      "flint"
+    ],
+    "uuid": "e885fe86-7f63-4248-b06b-9d04b1d87525",
+    "watchapp": {
+      "watchface": false
+    }
+  },
+  "version": "1.0.0"
+}
