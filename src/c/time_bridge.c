@@ -3,7 +3,7 @@
 // Time Bridge is intentionally resource-free. The face is drawn with Pebble's
 // native Graphics API and the menus use MenuLayer.
 
-#define SETTINGS_SCHEMA_VERSION 6
+#define SETTINGS_SCHEMA_VERSION 7
 #define DEFAULT_ZONE_INDEX 22
 #define UTC_TIMEZONE_INDEX 14
 #define RECENT_ZONE_LIMIT 5
@@ -39,7 +39,22 @@ typedef struct {
   uint8_t recent_count;
   int8_t recent_zones[RECENT_ZONE_LIMIT];
   uint8_t use_time_colors;
+  uint8_t show_icon_background;
+  uint8_t crossed_icon_layout;
 } Settings;
+
+// Stored layout from version 6, retained to preserve preferences when the
+// icon display settings were added.
+typedef struct {
+  uint8_t dark_theme;
+  uint8_t show_date;
+  uint8_t use_24_hour;
+  uint8_t schema_version;
+  int8_t selected_zone;
+  uint8_t recent_count;
+  int8_t recent_zones[RECENT_ZONE_LIMIT];
+  uint8_t use_time_colors;
+} SettingsV6;
 
 // Stored layout from version 5, retained only to preserve existing preferences
 // while translating timezone indexes into their new offset-sorted positions.
@@ -135,7 +150,7 @@ static char s_selected_date_text[20];
 // lifetime of the menu rather than being composed in a drawing callback.
 static SimpleMenuItem s_main_menu_items[3];
 static SimpleMenuSection s_main_menu_section;
-static SimpleMenuItem s_menu_items[5];
+static SimpleMenuItem s_menu_items[7];
 static SimpleMenuSection s_menu_section;
 static SimpleMenuItem s_timezone_menu_items[TIMEZONE_COUNT];
 static SimpleMenuSection s_timezone_menu_section;
@@ -184,6 +199,8 @@ static void restore_default_settings(void) {
     s_settings.recent_zones[index] = -1;
   }
   s_settings.use_time_colors = true;
+  s_settings.show_icon_background = true;
+  s_settings.crossed_icon_layout = false;
 }
 
 static void save_settings(void) {
@@ -201,12 +218,31 @@ static void load_settings(void) {
     int persisted_size = persist_read_data(PERSIST_KEY_SETTINGS, &s_settings, sizeof(s_settings));
     if (persisted_size != (int)sizeof(s_settings)
         || s_settings.schema_version != SETTINGS_SCHEMA_VERSION) {
+      SettingsV6 version_six_settings;
       SettingsV5 old_settings;
-      bool can_migrate = persisted_size == (int)sizeof(old_settings)
+      bool can_migrate_version_six = persisted_size == (int)sizeof(version_six_settings)
+          && persist_read_data(PERSIST_KEY_SETTINGS, &version_six_settings,
+                               sizeof(version_six_settings))
+              == (int)sizeof(version_six_settings)
+          && version_six_settings.schema_version == 6;
+      bool can_migrate_version_five = persisted_size == (int)sizeof(old_settings)
           && persist_read_data(PERSIST_KEY_SETTINGS, &old_settings, sizeof(old_settings))
               == (int)sizeof(old_settings)
           && old_settings.schema_version == 5;
-      if (can_migrate) {
+      if (can_migrate_version_six) {
+        s_settings.dark_theme = version_six_settings.dark_theme;
+        s_settings.show_date = version_six_settings.show_date;
+        s_settings.use_24_hour = version_six_settings.use_24_hour;
+        s_settings.schema_version = SETTINGS_SCHEMA_VERSION;
+        s_settings.selected_zone = version_six_settings.selected_zone;
+        s_settings.recent_count = version_six_settings.recent_count;
+        for (int index = 0; index < RECENT_ZONE_LIMIT; index++) {
+          s_settings.recent_zones[index] = version_six_settings.recent_zones[index];
+        }
+        s_settings.use_time_colors = version_six_settings.use_time_colors;
+        s_settings.show_icon_background = true;
+        s_settings.crossed_icon_layout = false;
+      } else if (can_migrate_version_five) {
         s_settings.dark_theme = old_settings.dark_theme;
         s_settings.show_date = old_settings.show_date;
         s_settings.use_24_hour = old_settings.use_24_hour;
@@ -217,6 +253,8 @@ static void load_settings(void) {
           s_settings.recent_zones[index] = timezone_index_from_v5(old_settings.recent_zones[index]);
         }
         s_settings.use_time_colors = true;
+        s_settings.show_icon_background = true;
+        s_settings.crossed_icon_layout = false;
       } else {
         restore_default_settings();
       }
@@ -334,6 +372,13 @@ static void draw_centered_text(GContext *ctx, const char *text, GFont font, GRec
                      GTextAlignmentCenter, NULL);
 }
 
+static int text_width(const char *text, GFont font) {
+  GSize size = graphics_text_layout_get_content_size(
+      text, font, GRect(0, 0, 200, 40), GTextOverflowModeTrailingEllipsis,
+      GTextAlignmentLeft);
+  return size.w;
+}
+
 static void draw_dotted_divider(GContext *ctx, int width, int y) {
   graphics_context_set_stroke_color(ctx, border_color());
   int line_start = 5;
@@ -374,26 +419,48 @@ static GColor day_night_time_color(bool night) {
 #endif
 }
 
+static GColor day_night_icon_foreground_color(bool night) {
+#if defined(PBL_COLOR)
+  return s_settings.show_icon_background ? GColorWhite : day_night_icon_background(night);
+#else
+  // A black symbol would disappear against a dark monochrome face.
+  return foreground_color();
+#endif
+}
+
+static void draw_plus_star(GContext *ctx, int center_x, int center_y, int arm_length) {
+  for (int offset = -arm_length; offset <= arm_length; offset++) {
+    graphics_draw_pixel(ctx, GPoint(center_x, center_y + offset));
+    graphics_draw_pixel(ctx, GPoint(center_x + offset, center_y));
+  }
+}
+
 static void draw_day_night_icon(GContext *ctx, int center_x, int center_y, bool night) {
   GPoint center = GPoint(center_x, center_y);
   GColor icon_background = day_night_icon_background(night);
-  GColor icon_foreground = GColorWhite;
+  GColor icon_foreground = day_night_icon_foreground_color(night);
 
-  graphics_context_set_fill_color(ctx, icon_background);
-  graphics_fill_circle(ctx, center, 16);
-  graphics_context_set_stroke_color(ctx, border_color());
-  graphics_draw_circle(ctx, center, 16);
+  if (s_settings.show_icon_background) {
+    graphics_context_set_fill_color(ctx, icon_background);
+    graphics_fill_circle(ctx, center, 16);
+    graphics_context_set_stroke_color(ctx, border_color());
+    graphics_draw_circle(ctx, center, 16);
+  }
 
   graphics_context_set_fill_color(ctx, icon_foreground);
   graphics_context_set_stroke_color(ctx, icon_foreground);
   if (night) {
-    graphics_fill_circle(ctx, GPoint(center_x - 2, center_y + 1), 7);
-    graphics_context_set_fill_color(ctx, icon_background);
-    graphics_fill_circle(ctx, GPoint(center_x + 2, center_y - 2), 7);
-    graphics_context_set_stroke_color(ctx, GColorWhite);
-    graphics_draw_pixel(ctx, GPoint(center_x - 9, center_y - 7));
-    graphics_draw_pixel(ctx, GPoint(center_x + 8, center_y - 7));
-    graphics_draw_pixel(ctx, GPoint(center_x + 8, center_y + 7));
+    // A broad crescent, opened toward the upper-right like Pebble's classic
+    // weather-style moon icon.
+    graphics_fill_circle(ctx, GPoint(center_x - 2, center_y + 1), 10);
+    graphics_context_set_fill_color(ctx, s_settings.show_icon_background
+        ? icon_background : background_color());
+    graphics_fill_circle(ctx, GPoint(center_x + 4, center_y - 4), 10);
+    // Stars sit in the crescent's upper-right shadow and remain visible when
+    // the circular backing is disabled.
+    graphics_context_set_stroke_color(ctx, icon_foreground);
+    draw_plus_star(ctx, center_x + 7, center_y - 8, 2);
+    draw_plus_star(ctx, center_x + 11, center_y - 2, 1);
     return;
   }
 
@@ -410,45 +477,90 @@ static void draw_day_night_icon(GContext *ctx, int center_x, int center_y, bool 
 
 static void draw_time_group(GContext *ctx, int width, int top, const char *heading,
                             const char *time_text, const char *date_text,
-                            const struct tm *time_info) {
+                            const struct tm *time_info, bool icon_on_left) {
   bool night = is_night_time(time_info);
   GColor time_color = day_night_time_color(night);
   int text_top = s_settings.show_date ? 10 : 18;
   int time_top = text_top + 13;
   int date_top = text_top + 50;
   int content_left = 5;
-  int icon_center_x = width - 23;
+  int right_icon_center_x = width - 23;
   int icon_text_left = width - 43;
   // Shared content inset for every display; the dotted divider remains edge-to-edge.
   content_left += 2;
-  icon_center_x -= 2;
+  right_icon_center_x -= 2;
   icon_text_left -= 2;
 #if defined(PBL_PLATFORM_EMERY)
   // Retain Emery's existing extra inset in addition to the shared 10px inset.
   content_left += 15;
-  icon_center_x -= 15;
+  right_icon_center_x -= 15;
   icon_text_left -= 15;
 #endif
-  int left_text_width = icon_center_x - 18 - content_left;
+  int info_text_width = right_icon_center_x - 18 - content_left;
+  int time_left = content_left;
+  int time_width = info_text_width;
+  int icon_center_x = right_icon_center_x;
+  int meridiem_left = icon_text_left;
+  if (icon_on_left) {
+    // In crossed mode the top icon starts on the same left edge as the date.
+    // Heading, time, and date share one left-aligned column. Its right edge
+    // exactly matches the lower card icon's outer-right edge.
+    icon_center_x = content_left + 16;
+    int text_right = right_icon_center_x + 16;
+    int widest_text = text_width(time_text, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS));
+    int heading_width = text_width(heading, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
+    if (heading_width > widest_text) {
+      widest_text = heading_width;
+    }
+    if (s_settings.show_date) {
+      int date_width = text_width(date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+      if (date_width > widest_text) {
+        widest_text = date_width;
+      }
+    }
+    time_left = text_right - widest_text;
+    if (time_left < icon_center_x + 18) {
+      time_left = icon_center_x + 18;
+      text_right = width - content_left;
+    }
+    time_width = text_right - time_left;
+    meridiem_left = icon_center_x - 20;
+  }
   // Align the icon to the large time's visual row and AM/PM to the date row.
   int icon_center_y = time_top + 18;
   graphics_context_set_text_color(ctx, foreground_color());
-  draw_left_text(ctx, heading, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                 GRect(content_left, top + text_top, left_text_width, 14));
+  if (icon_on_left) {
+    draw_left_text(ctx, heading, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                   GRect(time_left, top + text_top, time_width, 14));
+  } else {
+    draw_left_text(ctx, heading, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
+                   GRect(content_left, top + text_top, info_text_width, 14));
+  }
   graphics_context_set_text_color(ctx, time_color);
-  draw_left_text(ctx, time_text, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS),
-                 GRect(content_left, top + time_top, left_text_width, 36));
+  if (icon_on_left) {
+    draw_left_text(ctx, time_text, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS),
+                   GRect(time_left, top + time_top, time_width, 36));
+  } else {
+    draw_left_text(ctx, time_text, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS),
+                   GRect(time_left, top + time_top, time_width, 36));
+  }
   if (s_settings.show_date) {
     graphics_context_set_text_color(ctx, foreground_color());
-    draw_left_text(ctx, date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14),
-                   GRect(content_left, top + date_top, left_text_width, 14));
+    if (icon_on_left) {
+      draw_left_text(ctx, date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14),
+                     GRect(time_left, top + date_top, time_width, 14));
+    } else {
+      draw_left_text(ctx, date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14),
+                     GRect(content_left, top + date_top, info_text_width, 14));
+    }
   }
   draw_day_night_icon(ctx, icon_center_x, top + icon_center_y, night);
   if (!s_settings.use_24_hour) {
-    graphics_context_set_text_color(ctx, time_color);
+    graphics_context_set_text_color(ctx, s_settings.show_icon_background
+        ? time_color : day_night_icon_foreground_color(night));
     draw_centered_text(ctx, time_info->tm_hour < 12 ? "AM" : "PM",
                        fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                       GRect(icon_text_left, top + date_top, 40, 14));
+                       GRect(meridiem_left, top + date_top, 40, 14));
   }
 }
 
@@ -478,11 +590,12 @@ static void face_layer_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, background_color());
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
   draw_time_group(ctx, width, top, "Timebridge", s_local_time_text,
-                  s_local_date_text, &s_local_display_time);
+                  s_local_date_text, &s_local_display_time,
+                  s_settings.crossed_icon_layout);
   draw_dotted_divider(ctx, width, top + 84);
   draw_time_group(ctx, width, top + 84, selected_timezone->label,
                   s_selected_time_text, s_selected_date_text,
-                  &s_selected_display_time);
+                  &s_selected_display_time, false);
 }
 
 static void refresh_face(void) {
@@ -499,7 +612,15 @@ static GColor menu_highlight_color(void) {
 #if defined(PBL_COLOR)
   return GColorBlue;
 #else
-  return GColorBlack;
+  return s_settings.dark_theme ? GColorWhite : GColorBlack;
+#endif
+}
+
+static GColor menu_highlight_text_color(void) {
+#if defined(PBL_COLOR)
+  return GColorWhite;
+#else
+  return s_settings.dark_theme ? GColorBlack : GColorWhite;
 #endif
 }
 
@@ -510,7 +631,8 @@ static void apply_menu_layer_colors(Window *window, SimpleMenuLayer *menu_layer)
   window_set_background_color(window, background_color());
   MenuLayer *native_menu = simple_menu_layer_get_menu_layer(menu_layer);
   menu_layer_set_normal_colors(native_menu, background_color(), foreground_color());
-  menu_layer_set_highlight_colors(native_menu, menu_highlight_color(), GColorWhite);
+  menu_layer_set_highlight_colors(native_menu, menu_highlight_color(),
+                                  menu_highlight_text_color());
   layer_mark_dirty(simple_menu_layer_get_layer(menu_layer));
 }
 
@@ -552,7 +674,7 @@ static void prepare_main_menu(void) {
 static void prepare_settings_menu(void) {
   s_menu_section.title = "Settings";
   s_menu_section.items = s_menu_items;
-  s_menu_section.num_items = 5;
+  s_menu_section.num_items = 7;
   s_menu_items[0] = (SimpleMenuItem) {
     .title = "Dark theme",
     .subtitle = s_settings.dark_theme ? "On" : "Off",
@@ -574,6 +696,16 @@ static void prepare_settings_menu(void) {
     .callback = settings_item_selected_callback
   };
   s_menu_items[4] = (SimpleMenuItem) {
+    .title = "Icon background",
+    .subtitle = s_settings.show_icon_background ? "On" : "Off",
+    .callback = settings_item_selected_callback
+  };
+  s_menu_items[5] = (SimpleMenuItem) {
+    .title = "Crossed icons",
+    .subtitle = s_settings.crossed_icon_layout ? "On" : "Off",
+    .callback = settings_item_selected_callback
+  };
+  s_menu_items[6] = (SimpleMenuItem) {
     .title = "24-hour time",
     .subtitle = s_settings.use_24_hour ? "On" : "Off",
     .callback = settings_item_selected_callback
@@ -688,6 +820,10 @@ static void settings_item_selected_callback(int index, void *context) {
   } else if (index == 3) {
     s_settings.use_time_colors = !s_settings.use_time_colors;
   } else if (index == 4) {
+    s_settings.show_icon_background = !s_settings.show_icon_background;
+  } else if (index == 5) {
+    s_settings.crossed_icon_layout = !s_settings.crossed_icon_layout;
+  } else if (index == 6) {
     s_settings.use_24_hour = !s_settings.use_24_hour;
   } else {
     return;
