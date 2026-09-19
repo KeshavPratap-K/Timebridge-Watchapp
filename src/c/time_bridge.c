@@ -40,6 +40,26 @@ typedef struct {
 } Settings;
 
 typedef struct {
+  GColor upper_time;
+  GColor lower_time;
+  GColor meridiem;
+} TimeTextColors;
+
+// Edit these named fields to customize the two time values and AM/PM labels.
+// Separate light and dark values keep every color legible after theme changes.
+static const TimeTextColors s_light_time_text_colors = {
+  .upper_time = GColorBlack,
+  .lower_time = GColorBlack,
+  .meridiem = GColorBlack
+};
+
+static const TimeTextColors s_dark_time_text_colors = {
+  .upper_time = GColorWhite,
+  .lower_time = GColorWhite,
+  .meridiem = GColorWhite
+};
+
+typedef struct {
   const char *label;
   const char *subtitle;
   int16_t offset_minutes;
@@ -138,6 +158,10 @@ static GColor background_color(void) {
 
 static GColor foreground_color(void) {
   return s_settings.dark_theme ? GColorWhite : GColorBlack;
+}
+
+static const TimeTextColors *time_text_colors(void) {
+  return s_settings.dark_theme ? &s_dark_time_text_colors : &s_light_time_text_colors;
 }
 
 static GColor border_color(void) {
@@ -351,30 +375,34 @@ static void draw_day_night_icon(GContext *ctx, int center_x, int center_y, bool 
 
 static void draw_time_group(GContext *ctx, int width, int top, const char *heading,
                             const char *time_text, const char *date_text,
-                            const struct tm *time_info) {
+                            const struct tm *time_info, GColor time_color,
+                            GColor meridiem_color) {
   int text_top = s_settings.show_date ? 10 : 18;
   int content_left = 5;
   int icon_center_x = width - 23;
   int icon_text_left = width - 43;
 #if defined(PBL_PLATFORM_EMERY)
-  content_left += 5;
-  icon_center_x -= 5;
-  icon_text_left -= 5;
+  content_left += 15;
+  icon_center_x -= 15;
+  icon_text_left -= 15;
 #endif
   int left_text_width = icon_center_x - 18 - content_left;
   int icon_center_y = s_settings.use_24_hour ? 42 : 33;
   graphics_context_set_text_color(ctx, foreground_color());
   draw_left_text(ctx, heading, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
                  GRect(content_left, top + text_top, left_text_width, 14));
+  graphics_context_set_text_color(ctx, time_color);
   draw_left_text(ctx, time_text, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS),
                  GRect(content_left, top + text_top + 13, left_text_width, 36));
   if (s_settings.show_date) {
+    graphics_context_set_text_color(ctx, foreground_color());
     draw_left_text(ctx, date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14),
                    GRect(content_left, top + text_top + 50, left_text_width, 14));
   }
   draw_day_night_icon(ctx, icon_center_x, top + icon_center_y,
                       is_night_time(time_info));
   if (!s_settings.use_24_hour) {
+    graphics_context_set_text_color(ctx, meridiem_color);
     draw_centered_text(ctx, time_info->tm_hour < 12 ? "AM" : "PM",
                        fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
                        GRect(icon_text_left, top + 52, 40, 14));
@@ -401,12 +429,15 @@ static void face_layer_update_proc(Layer *layer, GContext *ctx) {
 
   graphics_context_set_fill_color(ctx, background_color());
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+  const TimeTextColors *text_colors = time_text_colors();
   draw_time_group(ctx, width, top, "Timebridge", s_local_time_text,
-                  s_local_date_text, &s_local_display_time);
+                  s_local_date_text, &s_local_display_time, text_colors->upper_time,
+                  text_colors->meridiem);
   draw_dotted_divider(ctx, width, top + 84);
   draw_time_group(ctx, width, top + 84, selected_timezone->label,
                   s_selected_time_text, s_selected_date_text,
-                  &s_selected_display_time);
+                  &s_selected_display_time, text_colors->lower_time,
+                  text_colors->meridiem);
 }
 
 static void refresh_face(void) {
