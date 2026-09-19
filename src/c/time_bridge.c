@@ -378,13 +378,15 @@ static void draw_time_group(GContext *ctx, int width, int top, const char *headi
                             const struct tm *time_info, GColor time_color,
                             GColor meridiem_color) {
   int text_top = s_settings.show_date ? 10 : 18;
+  int time_top = text_top + 13;
+  int date_top = text_top + 50;
   int content_left = 5;
   int icon_center_x = width - 23;
   int icon_text_left = width - 43;
   // Shared content inset for every display; the dotted divider remains edge-to-edge.
-  content_left += 10;
-  icon_center_x -= 10;
-  icon_text_left -= 10;
+  content_left += 2;
+  icon_center_x -= 2;
+  icon_text_left -= 2;
 #if defined(PBL_PLATFORM_EMERY)
   // Retain Emery's existing extra inset in addition to the shared 10px inset.
   content_left += 15;
@@ -392,17 +394,18 @@ static void draw_time_group(GContext *ctx, int width, int top, const char *headi
   icon_text_left -= 15;
 #endif
   int left_text_width = icon_center_x - 18 - content_left;
-  int icon_center_y = s_settings.use_24_hour ? 42 : 33;
+  // Align the icon to the large time's visual row and AM/PM to the date row.
+  int icon_center_y = time_top + 18;
   graphics_context_set_text_color(ctx, foreground_color());
   draw_left_text(ctx, heading, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
                  GRect(content_left, top + text_top, left_text_width, 14));
   graphics_context_set_text_color(ctx, time_color);
   draw_left_text(ctx, time_text, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS),
-                 GRect(content_left, top + text_top + 13, left_text_width, 36));
+                 GRect(content_left, top + time_top, left_text_width, 36));
   if (s_settings.show_date) {
     graphics_context_set_text_color(ctx, foreground_color());
     draw_left_text(ctx, date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14),
-                   GRect(content_left, top + text_top + 50, left_text_width, 14));
+                   GRect(content_left, top + date_top, left_text_width, 14));
   }
   draw_day_night_icon(ctx, icon_center_x, top + icon_center_y,
                       is_night_time(time_info));
@@ -410,7 +413,7 @@ static void draw_time_group(GContext *ctx, int width, int top, const char *headi
     graphics_context_set_text_color(ctx, meridiem_color);
     draw_centered_text(ctx, time_info->tm_hour < 12 ? "AM" : "PM",
                        fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                       GRect(icon_text_left, top + 52, 40, 14));
+                       GRect(icon_text_left, top + date_top, 40, 14));
   }
 }
 
