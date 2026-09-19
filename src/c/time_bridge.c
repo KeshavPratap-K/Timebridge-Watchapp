@@ -381,7 +381,12 @@ static void draw_time_group(GContext *ctx, int width, int top, const char *headi
   int content_left = 5;
   int icon_center_x = width - 23;
   int icon_text_left = width - 43;
+  // Shared content inset for every display; the dotted divider remains edge-to-edge.
+  content_left += 10;
+  icon_center_x -= 10;
+  icon_text_left -= 10;
 #if defined(PBL_PLATFORM_EMERY)
+  // Retain Emery's existing extra inset in addition to the shared 10px inset.
   content_left += 15;
   icon_center_x -= 15;
   icon_text_left -= 15;
@@ -419,8 +424,13 @@ static void face_layer_update_proc(Layer *layer, GContext *ctx) {
   time_t now = time(NULL);
   s_local_display_time = *localtime(&now);
   const TimeZone *selected_timezone = &s_timezones[s_settings.selected_zone];
-  time_t selected_epoch = now + (selected_timezone->offset_minutes * 60);
-  s_selected_display_time = *gmtime(&selected_epoch);
+  // `now` is an absolute timestamp. Shift it by the difference between the
+  // system's current offset (including DST) and the selected fixed offset,
+  // then let localtime render the adjusted wall-clock time. This keeps IST
+  // unchanged on an IST-configured watch instead of adding +5:30 twice.
+  int selected_offset_seconds = selected_timezone->offset_minutes * SECONDS_PER_MINUTE;
+  time_t selected_epoch = now + selected_offset_seconds - s_local_display_time.tm_gmtoff;
+  s_selected_display_time = *localtime(&selected_epoch);
 
   format_time(&s_local_display_time, s_local_time_text, sizeof(s_local_time_text));
   format_time(&s_selected_display_time, s_selected_time_text, sizeof(s_selected_time_text));
