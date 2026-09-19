@@ -3,8 +3,9 @@
 // Time Bridge is intentionally resource-free. The face is drawn with Pebble's
 // native Graphics API and the menus use MenuLayer.
 
-#define SETTINGS_SCHEMA_VERSION 5
-#define DEFAULT_ZONE_INDEX 1
+#define SETTINGS_SCHEMA_VERSION 6
+#define DEFAULT_ZONE_INDEX 22
+#define UTC_TIMEZONE_INDEX 14
 #define RECENT_ZONE_LIMIT 5
 
 enum {
@@ -37,27 +38,20 @@ typedef struct {
   int8_t selected_zone;
   uint8_t recent_count;
   int8_t recent_zones[RECENT_ZONE_LIMIT];
+  uint8_t use_time_colors;
 } Settings;
 
+// Stored layout from version 5, retained only to preserve existing preferences
+// while translating timezone indexes into their new offset-sorted positions.
 typedef struct {
-  GColor upper_time;
-  GColor lower_time;
-  GColor meridiem;
-} TimeTextColors;
-
-// Edit these named fields to customize the two time values and AM/PM labels.
-// Separate light and dark values keep every color legible after theme changes.
-static const TimeTextColors s_light_time_text_colors = {
-  .upper_time = GColorBlack,
-  .lower_time = GColorBlack,
-  .meridiem = GColorBlack
-};
-
-static const TimeTextColors s_dark_time_text_colors = {
-  .upper_time = GColorWhite,
-  .lower_time = GColorWhite,
-  .meridiem = GColorWhite
-};
+  uint8_t dark_theme;
+  uint8_t show_date;
+  uint8_t use_24_hour;
+  uint8_t schema_version;
+  int8_t selected_zone;
+  uint8_t recent_count;
+  int8_t recent_zones[RECENT_ZONE_LIMIT];
+} SettingsV5;
 
 typedef struct {
   const char *label;
@@ -69,23 +63,21 @@ typedef struct {
 // UTC offset, including the 30- and 45-minute offsets. The watch stays fully
 // offline; daylight-saving changes are outside this fixed-offset model.
 static const TimeZone s_timezones[] = {
-  { "UTC (+0:00)", "Coordinated Universal Time", 0 },
-  { "IST (+5:30)", "India Standard Time", 330 },
-  { "EST (-5:00)", "Eastern Standard Time", -300 },
-  { "PST (-8:00)", "Pacific Standard Time", -480 },
-  { "JST (+9:00)", "Japan Standard Time", 540 },
   { "BIT (-12:00)", "Baker Island Time", -720 },
   { "SST (-11:00)", "Samoa Standard Time", -660 },
   { "HST (-10:00)", "Hawaii Standard Time", -600 },
   { "MART (-9:30)", "Marquesas Time", -570 },
   { "AKST (-9:00)", "Alaska Standard Time", -540 },
+  { "PST (-8:00)", "Pacific Standard Time", -480 },
   { "MST (-7:00)", "Mountain Standard Time", -420 },
   { "CST (-6:00)", "Central Standard Time", -360 },
+  { "EST (-5:00)", "Eastern Standard Time", -300 },
   { "AST (-4:00)", "Atlantic Standard Time", -240 },
   { "NST (-3:30)", "Newfoundland Standard Time", -210 },
   { "BRT (-3:00)", "Brasilia Time", -180 },
   { "GST (-2:00)", "South Georgia Time", -120 },
   { "CVT (-1:00)", "Cape Verde Time", -60 },
+  { "UTC (+0:00)", "Coordinated Universal Time", 0 },
   { "CET (+1:00)", "Central European Time", 60 },
   { "EET (+2:00)", "Eastern European Time", 120 },
   { "MSK (+3:00)", "Moscow Standard Time", 180 },
@@ -93,12 +85,14 @@ static const TimeZone s_timezones[] = {
   { "GST (+4:00)", "Gulf Standard Time", 240 },
   { "AFT (+4:30)", "Afghanistan Time", 270 },
   { "PKT (+5:00)", "Pakistan Standard Time", 300 },
+  { "IST (+5:30)", "India Standard Time", 330 },
   { "NPT (+5:45)", "Nepal Time", 345 },
   { "BST (+6:00)", "Bangladesh Standard Time", 360 },
   { "MMT (+6:30)", "Myanmar Time", 390 },
   { "ICT (+7:00)", "Indochina Time", 420 },
   { "WITA (+8:00)", "Central Indonesia Time", 480 },
   { "ACWST (+8:45)", "Australian Central Western Time", 525 },
+  { "JST (+9:00)", "Japan Standard Time", 540 },
   { "ACST (+9:30)", "Australian Central Standard Time", 570 },
   { "AEST (+10:00)", "Australian Eastern Standard Time", 600 },
   { "LHST (+10:30)", "Lord Howe Standard Time", 630 },
@@ -141,7 +135,7 @@ static char s_selected_date_text[20];
 // lifetime of the menu rather than being composed in a drawing callback.
 static SimpleMenuItem s_main_menu_items[3];
 static SimpleMenuSection s_main_menu_section;
-static SimpleMenuItem s_menu_items[4];
+static SimpleMenuItem s_menu_items[5];
 static SimpleMenuSection s_menu_section;
 static SimpleMenuItem s_timezone_menu_items[TIMEZONE_COUNT];
 static SimpleMenuSection s_timezone_menu_section;
@@ -160,10 +154,6 @@ static GColor foreground_color(void) {
   return s_settings.dark_theme ? GColorWhite : GColorBlack;
 }
 
-static const TimeTextColors *time_text_colors(void) {
-  return s_settings.dark_theme ? &s_dark_time_text_colors : &s_light_time_text_colors;
-}
-
 static GColor border_color(void) {
   return s_settings.dark_theme ? GColorLightGray : GColorDarkGray;
 }
@@ -172,8 +162,19 @@ static bool is_valid_timezone_index(int index) {
   return index >= 0 && index < TIMEZONE_COUNT;
 }
 
+static int8_t timezone_index_from_v5(int8_t index) {
+  // Version 5 stored zones in an app-specific order. Keep that data useful
+  // after arranging the menu by UTC offset.
+  static const int8_t s_v5_to_sorted_timezone_index[TIMEZONE_COUNT] = {
+    14, 22, 8, 5, 29, 0, 1, 2, 3, 4, 6, 7, 9, 10, 11, 12, 13, 15, 16,
+    17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28, 30, 31, 32, 33, 34,
+    35, 36, 37
+  };
+  return is_valid_timezone_index(index) ? s_v5_to_sorted_timezone_index[index] : -1;
+}
+
 static void restore_default_settings(void) {
-  s_settings.dark_theme = false;
+  s_settings.dark_theme = true;
   s_settings.show_date = true;
   s_settings.use_24_hour = false;
   s_settings.schema_version = SETTINGS_SCHEMA_VERSION;
@@ -182,6 +183,7 @@ static void restore_default_settings(void) {
   for (int index = 0; index < RECENT_ZONE_LIMIT; index++) {
     s_settings.recent_zones[index] = -1;
   }
+  s_settings.use_time_colors = true;
 }
 
 static void save_settings(void) {
@@ -199,7 +201,25 @@ static void load_settings(void) {
     int persisted_size = persist_read_data(PERSIST_KEY_SETTINGS, &s_settings, sizeof(s_settings));
     if (persisted_size != (int)sizeof(s_settings)
         || s_settings.schema_version != SETTINGS_SCHEMA_VERSION) {
-      restore_default_settings();
+      SettingsV5 old_settings;
+      bool can_migrate = persisted_size == (int)sizeof(old_settings)
+          && persist_read_data(PERSIST_KEY_SETTINGS, &old_settings, sizeof(old_settings))
+              == (int)sizeof(old_settings)
+          && old_settings.schema_version == 5;
+      if (can_migrate) {
+        s_settings.dark_theme = old_settings.dark_theme;
+        s_settings.show_date = old_settings.show_date;
+        s_settings.use_24_hour = old_settings.use_24_hour;
+        s_settings.schema_version = SETTINGS_SCHEMA_VERSION;
+        s_settings.selected_zone = timezone_index_from_v5(old_settings.selected_zone);
+        s_settings.recent_count = old_settings.recent_count;
+        for (int index = 0; index < RECENT_ZONE_LIMIT; index++) {
+          s_settings.recent_zones[index] = timezone_index_from_v5(old_settings.recent_zones[index]);
+        }
+        s_settings.use_time_colors = true;
+      } else {
+        restore_default_settings();
+      }
       save_settings();
     }
   }
@@ -339,6 +359,21 @@ static GColor day_night_icon_background(bool night) {
 #endif
 }
 
+// The time mirrors its sun/moon badge: darker on a light face, lighter on a dark face.
+static GColor day_night_time_color(bool night) {
+  if (!s_settings.use_time_colors) {
+    return foreground_color();
+  }
+#if defined(PBL_COLOR)
+  if (s_settings.dark_theme) {
+    return night ? GColorFromRGB(85, 85, 255) : GColorFromRGB(255, 170, 85);
+  }
+  return night ? GColorFromRGB(0, 0, 85) : GColorFromRGB(85, 43, 0);
+#else
+  return foreground_color();
+#endif
+}
+
 static void draw_day_night_icon(GContext *ctx, int center_x, int center_y, bool night) {
   GPoint center = GPoint(center_x, center_y);
   GColor icon_background = day_night_icon_background(night);
@@ -375,8 +410,9 @@ static void draw_day_night_icon(GContext *ctx, int center_x, int center_y, bool 
 
 static void draw_time_group(GContext *ctx, int width, int top, const char *heading,
                             const char *time_text, const char *date_text,
-                            const struct tm *time_info, GColor time_color,
-                            GColor meridiem_color) {
+                            const struct tm *time_info) {
+  bool night = is_night_time(time_info);
+  GColor time_color = day_night_time_color(night);
   int text_top = s_settings.show_date ? 10 : 18;
   int time_top = text_top + 13;
   int date_top = text_top + 50;
@@ -407,10 +443,9 @@ static void draw_time_group(GContext *ctx, int width, int top, const char *headi
     draw_left_text(ctx, date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14),
                    GRect(content_left, top + date_top, left_text_width, 14));
   }
-  draw_day_night_icon(ctx, icon_center_x, top + icon_center_y,
-                      is_night_time(time_info));
+  draw_day_night_icon(ctx, icon_center_x, top + icon_center_y, night);
   if (!s_settings.use_24_hour) {
-    graphics_context_set_text_color(ctx, meridiem_color);
+    graphics_context_set_text_color(ctx, time_color);
     draw_centered_text(ctx, time_info->tm_hour < 12 ? "AM" : "PM",
                        fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
                        GRect(icon_text_left, top + date_top, 40, 14));
@@ -442,15 +477,12 @@ static void face_layer_update_proc(Layer *layer, GContext *ctx) {
 
   graphics_context_set_fill_color(ctx, background_color());
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
-  const TimeTextColors *text_colors = time_text_colors();
   draw_time_group(ctx, width, top, "Timebridge", s_local_time_text,
-                  s_local_date_text, &s_local_display_time, text_colors->upper_time,
-                  text_colors->meridiem);
+                  s_local_date_text, &s_local_display_time);
   draw_dotted_divider(ctx, width, top + 84);
   draw_time_group(ctx, width, top + 84, selected_timezone->label,
                   s_selected_time_text, s_selected_date_text,
-                  &s_selected_display_time, text_colors->lower_time,
-                  text_colors->meridiem);
+                  &s_selected_display_time);
 }
 
 static void refresh_face(void) {
@@ -520,7 +552,7 @@ static void prepare_main_menu(void) {
 static void prepare_settings_menu(void) {
   s_menu_section.title = "Settings";
   s_menu_section.items = s_menu_items;
-  s_menu_section.num_items = 4;
+  s_menu_section.num_items = 5;
   s_menu_items[0] = (SimpleMenuItem) {
     .title = "Dark theme",
     .subtitle = s_settings.dark_theme ? "On" : "Off",
@@ -537,6 +569,11 @@ static void prepare_settings_menu(void) {
     .callback = settings_item_selected_callback
   };
   s_menu_items[3] = (SimpleMenuItem) {
+    .title = "Time colors",
+    .subtitle = s_settings.use_time_colors ? "On" : "Off",
+    .callback = settings_item_selected_callback
+  };
+  s_menu_items[4] = (SimpleMenuItem) {
     .title = "24-hour time",
     .subtitle = s_settings.use_24_hour ? "On" : "Off",
     .callback = settings_item_selected_callback
@@ -629,6 +666,9 @@ static void main_menu_item_selected_callback(int index, void *context) {
                                   MenuRowAlignTop, false);
     window_stack_push(s_recents_window, true);
   } else if (index == 1 && s_timezones_window && s_timezones_menu_layer) {
+    MenuLayer *native_timezones_menu = simple_menu_layer_get_menu_layer(s_timezones_menu_layer);
+    menu_layer_set_selected_index(native_timezones_menu, MenuIndex(0, UTC_TIMEZONE_INDEX),
+                                  MenuRowAlignCenter, false);
     window_stack_push(s_timezones_window, true);
   } else if (index == 2 && s_settings_window && s_settings_menu_layer) {
     window_stack_push(s_settings_window, true);
@@ -646,6 +686,8 @@ static void settings_item_selected_callback(int index, void *context) {
     }
     return;
   } else if (index == 3) {
+    s_settings.use_time_colors = !s_settings.use_time_colors;
+  } else if (index == 4) {
     s_settings.use_24_hour = !s_settings.use_24_hour;
   } else {
     return;
