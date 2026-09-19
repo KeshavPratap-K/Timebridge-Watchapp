@@ -292,7 +292,13 @@ static void draw_centered_text(GContext *ctx, const char *text, GFont font, GRec
 
 static void draw_dotted_divider(GContext *ctx, int width, int y) {
   graphics_context_set_stroke_color(ctx, border_color());
-  for (int x = 5; x < width - 5; x += 4) {
+  int line_start = 5;
+  int line_end = width - 5;
+#if defined(PBL_PLATFORM_EMERY)
+  line_start = 0;
+  line_end = width;
+#endif
+  for (int x = line_start; x < line_end; x += 4) {
     graphics_draw_line(ctx, GPoint(x, y), GPoint(x + 1, y));
   }
 }
@@ -347,22 +353,31 @@ static void draw_time_group(GContext *ctx, int width, int top, const char *headi
                             const char *time_text, const char *date_text,
                             const struct tm *time_info) {
   int text_top = s_settings.show_date ? 10 : 18;
+  int content_left = 5;
+  int icon_center_x = width - 23;
+  int icon_text_left = width - 43;
+#if defined(PBL_PLATFORM_EMERY)
+  content_left += 5;
+  icon_center_x -= 5;
+  icon_text_left -= 5;
+#endif
+  int left_text_width = icon_center_x - 18 - content_left;
   int icon_center_y = s_settings.use_24_hour ? 42 : 33;
   graphics_context_set_text_color(ctx, foreground_color());
   draw_left_text(ctx, heading, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                 GRect(5, top + text_top, width - 46, 14));
+                 GRect(content_left, top + text_top, left_text_width, 14));
   draw_left_text(ctx, time_text, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS),
-                 GRect(5, top + text_top + 13, width - 46, 36));
+                 GRect(content_left, top + text_top + 13, left_text_width, 36));
   if (s_settings.show_date) {
     draw_left_text(ctx, date_text, fonts_get_system_font(FONT_KEY_GOTHIC_14),
-                   GRect(5, top + text_top + 50, width - 10, 14));
+                   GRect(content_left, top + text_top + 50, left_text_width, 14));
   }
-  draw_day_night_icon(ctx, width - 23, top + icon_center_y,
+  draw_day_night_icon(ctx, icon_center_x, top + icon_center_y,
                       is_night_time(time_info));
   if (!s_settings.use_24_hour) {
     draw_centered_text(ctx, time_info->tm_hour < 12 ? "AM" : "PM",
                        fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
-                       GRect(width - 43, top + 52, 40, 14));
+                       GRect(icon_text_left, top + 52, 40, 14));
   }
 }
 
